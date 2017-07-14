@@ -30,7 +30,7 @@ class IssueThread(object):
 
         for comment_fields in fields["long_desc"]:
             if comment_fields.get("thetext"):
-                self.comments.append(Comment(comment_fields))
+                self.comments.append(Comment(comment_fields, self.issue.attachments))
 
     def save(self):
         '''
@@ -68,7 +68,7 @@ class Issue(object):
         self.assignee_id = conf.gitlab_users[conf.bugzilla_users[fields["assigned_to"]]]
         self.status = fields["bug_status"]
         self.create_labels(fields["component"], fields.get("op_sys"))
-        self.create_description(fields)
+        self.attachments = self.create_description(fields)
 
     def create_labels(self, component, operating_system):
         '''
@@ -125,23 +125,32 @@ class Issue(object):
             ext_description += "\n\n".join(re.split("\n*", fields["long_desc"][0]["thetext"]))
             del fields["long_desc"][0]
 
-        attachments = []
+        attachments = dict()
+        for i in range(0, len(fields["attachment"])):
+            attachment = fields["attachment"][i]
+            attachments[int(attachment["attachid"])] = Attachment(int(attachment["attachid"]), attachment["filename"])
+
         to_delete = []
         for i in range(0, len(fields["long_desc"])):
             comment = fields["long_desc"][i]
             # any attachments from the reporter in comments should also go in the issue description
-            if comment.get("attachid") and comment.get("who") == fields["reporter"]:
-                filename = Attachment.parse_filename(comment.get("thetext"))
-                attachment_markdown = Attachment(comment.get("attachid"), filename).save()
-                attachments.append(attachment_markdown)
-                to_delete.append(i)
+            if comment.get("who") == fields["reporter"]:
+                attachment_id = Attachment.parse_comment_text(comment.get("thetext"))
+                if attachment_id:
+                    if attachment_id in attachments:
+                        to_delete.append(i)
+                    else:
+                        raise Exception("Match `{}' found in comment `{}', but attachment does not exist!".format(attachment_id, comment.get("thetext")))
 
         # delete comments that have already added to the issue description
         for i in reversed(to_delete):
             del fields["long_desc"][i]
 
         if attachments:
-            self.description += markdown_table_row("Attachments", ", ".join(attachments))
+            attachment_markdown = []
+            for key, attachment in attachments.iteritems():
+                attachment_markdown.append(str(attachment))
+            self.description += markdown_table_row("Attachments", ", ".join(attachment_markdown))
 
         if ext_description:
             # for situations where the reporter is a generic or old user, specify the original
@@ -159,6 +168,8 @@ class Issue(object):
                 self.description += markdown_table_row("Reporter", fields["reporter"])
 
             self.description += ext_description
+
+        return attachments
 
     def validate(self):
         for field in self.required_fields:
@@ -202,9 +213,10 @@ class Comment(object):
     required_fields = ["sudo", "body", "issue_id"]
     data_fields = ["body"]
 
-    def __init__(self, bugzilla_fields):
+    def __init__(self, bugzilla_fields, attachments):
         self.headers = conf.default_headers
         validate_user(bugzilla_fields["who"])
+        self.attachments = attachments
         self.load_fields(bugzilla_fields)
 
     def load_fields(self, fields):
@@ -221,8 +233,8 @@ class Comment(object):
         # if this comment is actually an attachment, upload the attachment and add the
         # markdown to the comment body
         if fields.get("attachid"):
-            filename = Attachment.parse_filename(fields["thetext"])
-            attachment_markdown = Attachment(fields["attachid"], filename).save()
+            attachment_id = Attachment.parse_comment_text(fields["thetext"])
+            attachment_markdown = str(self.attachments[attachment_id])
             self.body += attachment_markdown
         else:
             self.body += fields["thetext"]
@@ -252,16 +264,20 @@ class Attachment(object):
         self.id = bugzilla_attachment_id
         self.filename = filename
         self.headers = conf.default_headers
+        self.markdown = self.__upload_attachment()
+
+    def __str__(self):
+        return self.markdown
 
     @classmethod
-    def parse_filename(cls, comment):
-        regex = "^Created attachment (\d*)\s?(.*)$"
+    def parse_comment_text(cls, comment):
+        regex = "^Created an attachment \(id=(\d+)\).*$"
         matches = re.match(regex, comment, flags=re.M)
         if not matches:
-            raise Exception("Failed to match comment string: {}".format(comment))
-        return matches.group(2)
+            return False
+        return int(matches.group(1))
 
-    def save(self):
+    def __upload_attachment(self):
         url = "{}/attachment.cgi?id={}".format(conf.bugzilla_base_url, self.id)
         result = _perform_request(url, "get", json=False)
 
