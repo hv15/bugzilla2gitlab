@@ -9,8 +9,11 @@ def _perform_request(url, method, data={}, params={}, headers={}, files={}, json
     Utility method to perform an HTTP request.
     '''
     if dry_run and method != "get":
-        msg = "{} {} dry_run".format(url, method)
-        print(msg)
+        print("{} {} dry_run".format(url, method))
+        print(" - headers -> {}".format(headers))
+        print(" - data -> {}".format(data))
+        print(" - files -> {}".format(files))
+        print("")
         return 0
 
     func = getattr(requests, method)
@@ -25,9 +28,15 @@ def _perform_request(url, method, data={}, params={}, headers={}, files={}, json
             return result.json()
         else:
             return result
+    elif result.status_code in [404]:
+        print(result.json())
+        print("")
+        print("{} {} dry_run".format(url, method))
+        print(" - headers -> {}".format(headers))
+        print(" - data -> {}".format(data))
+        print(" - files -> {}".format(files))
 
     raise Exception("{} failed requests: {}".format(result.status_code, result.reason))
-
 
 def markdown_table_row(key, value):
     '''
@@ -62,6 +71,10 @@ def get_bugzilla_bug(bugzilla_url, bug_id):
                 new = {}
                 for data in field:
                     new[data.tag] = data.text
+                if field.tag == "attachment" and field.get("isobsolete", "0") == "1":
+                    new["isobsolete"] = True
+                else:
+                    new["isobsolete"] = False
                 bug_fields[field.tag].append(new)
             elif field.tag == "cc":
                 bug_fields[field.tag].append(field.text)

@@ -7,9 +7,10 @@ from .utils import _perform_request
 Config = namedtuple('Config', ["gitlab_base_url", "gitlab_project_id",
                                "bugzilla_base_url", "bugzilla_auto_reporter",
                                "default_headers", "component_mappings",
-                               "bugzilla_users", "gitlab_users", "gitlab_misc_user",
-                               "default_gitlab_labels", "datetime_format_string",
-                               "dry_run", "include_bugzilla_link"])
+                               "bugzilla_users", "gitlab_users", "gitlab_user_admins",
+                               "gitlab_misc_user", "default_gitlab_labels",
+                               "datetime_format_string", "dry_run",
+                               "include_bugzilla_link"])
 
 
 def get_config(path):
@@ -45,10 +46,12 @@ def _load_user_id_cache(path, gitlab_url, gitlab_headers):
         bugzilla_mapping = yaml.load(f)
 
     gitlab_users = {}
+    gitlab_user_admins = {}
     for user in bugzilla_mapping:
         gitlab_username = bugzilla_mapping[user]
-        uid = _get_user_id(gitlab_username, gitlab_url, gitlab_headers)
+        uid, isadmin = _get_user_id(gitlab_username, gitlab_url, gitlab_headers)
         gitlab_users[gitlab_username] = uid
+        gitlab_user_admins[uid] = isadmin
 
     mappings = {}
     # bugzilla_username: gitlab_username
@@ -57,6 +60,9 @@ def _load_user_id_cache(path, gitlab_url, gitlab_headers):
     # gitlab_username: gitlab_userid
     mappings["gitlab_users"] = gitlab_users
 
+    # gitlab_userids: is_admin
+    mappings["gitlab_user_admins"] = gitlab_user_admins
+
     return mappings
 
 
@@ -64,10 +70,9 @@ def _get_user_id(username, gitlab_url, headers):
     url = "{}/users?username={}".format(gitlab_url, username)
     result = _perform_request(url, "get", headers=headers)
     if result and isinstance(result, list):
-        return result[0]["id"]
+        return (result[0]["id"], result[0]["is_admin"])
     else:
         raise Exception("No gitlab account found for user {}".format(username))
-
 
 def _load_component_mappings(path):
     with open(os.path.join(path, "component_mappings.yml")) as f:
