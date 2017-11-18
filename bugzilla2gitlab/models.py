@@ -173,7 +173,7 @@ class Issue(object):
 
         if attachments:
             attachment_markdown = []
-            for key, attachment in attachments.iteritems():
+            for key, attachment in attachments.items():
                 attachment_markdown.append(str(attachment))
             self.description += markdown_table_row("Attachments", ", ".join(attachment_markdown))
 

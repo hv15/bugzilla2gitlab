@@ -23,6 +23,8 @@ def _perform_request(url, method, data={}, params={}, headers={}, files={}, json
     else:
         result = func(url, params=params, data=data, headers=headers)
 
+    #print(result.text)
+
     if result.status_code in [200, 201]:
         if json:
             return result.json()
